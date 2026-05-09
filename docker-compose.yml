@@ -1,0 +1,29 @@
+services:
+  edge-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.edge
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - EDGE_USERNAME=${EDGE_USERNAME}
+      - EDGE_PASSWORD=${EDGE_PASSWORD}
+      - EDGE_CURRICULUM_API=${EDGE_CURRICULUM_API:-}
+      - EDGE_CENTER_SERVER_URL=${EDGE_CENTER_SERVER_URL:-ws://center-server:8081/api/rollcall/ws}
+      - EDGE_CENTER_SERVER_SECRET=${EDGE_CENTER_SERVER_SECRET:-}
+      - EDGE_AUTO_LOCATION_CHECKIN=${EDGE_AUTO_LOCATION_CHECKIN:-true}
+    depends_on:
+      - center-server
+    restart: unless-stopped
+
+  center-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.center
+    ports:
+      - "8081:8081"
+    environment:
+      - CENTER_SECRET=${CENTER_SECRET:-}
+    restart: unless-stopped
