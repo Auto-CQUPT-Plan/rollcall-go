@@ -24,7 +24,7 @@ import (
 const (
 	lmsBase    = "http://lms.tc.cqupt.edu.cn"
 	idsBase    = "https://ids.cqupt.edu.cn"
-	userAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	userAgent  = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36"
 	apiVersion = "1.1.0"
 )
 
@@ -42,9 +42,9 @@ type CheckinResult struct {
 }
 
 type Client struct {
-	http  *http.Client
-	mu    sync.Mutex
-	log   *slog.Logger
+	http *http.Client
+	mu   sync.Mutex
+	log  *slog.Logger
 }
 
 // persistedCookie is used for JSON serialization of cookies.
@@ -62,7 +62,7 @@ func NewClient() *Client {
 			Jar:     jar,
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse // manual redirect handling
+				return http.ErrUseLastResponse
 			},
 		},
 		log: slog.With("component", "lms"),
@@ -85,24 +85,29 @@ func (c *Client) Login(ctx context.Context) error {
 func (c *Client) login(ctx context.Context) error {
 	c.log.Info("Starting IDS login")
 
-	// Clear cookies
+	// Clear cookies for fresh login
 	jar, _ := cookiejar.New(nil)
 	c.http.Jar = jar
 
-	// Step 1: GET /login to obtain callback URL
+	// Step 1: Follow up to 2 redirects from /login to get callback URL
+	// (matches Python: for _ in range(2): resp = send(req); req = resp.next_request)
 	callbackURL, err := c.getCallbackURL(ctx)
 	if err != nil {
 		return fmt.Errorf("get callback url: %w", err)
 	}
+	c.log.Info("Callback URL obtained", "url", callbackURL)
 
 	// Step 2: GET IDS login page to extract salt and execution token
-	loginURL := fmt.Sprintf("%s/authserver/login?service=%s", idsBase, url.QueryEscape(callbackURL))
-	salt, execution, err := c.getLoginPageParams(ctx, loginURL)
+	// Python uses: params={"service": str(callback_url)} which httpx appends as query param
+	idsLoginURL := idsBase + "/authserver/login"
+	salt, execution, err := c.getLoginPageParams(ctx, idsLoginURL+"?service="+url.QueryEscape(callbackURL))
 	if err != nil {
 		return fmt.Errorf("get login params: %w", err)
 	}
 
 	// Step 3: POST login credentials
+	// Python POSTs to: ids/authserver/login?service=callback_url
+	postURL := idsLoginURL + "?service=" + url.QueryEscape(callbackURL)
 	encPwd := crypto.EncryptPassword(config.Cfg.Password, salt)
 	formData := url.Values{
 		"username":  {config.Cfg.Username},
@@ -115,52 +120,52 @@ func (c *Client) login(ctx context.Context) error {
 		"execution": {execution},
 	}
 
-	resp, err := c.doRequest(ctx, "POST", loginURL, "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	resp, err := c.doRequest(ctx, "POST", postURL, "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
 	if err != nil {
 		return fmt.Errorf("submit login: %w", err)
 	}
-	defer resp.Body.Close()
 
-	// Step 4: Handle session kick ("踢出会话")
-	if resp.StatusCode == 200 {
+	// Step 4: Handle session kick ("踢出会话") or get redirect URL
+	var redirectURL string
+	if resp.StatusCode == 302 {
+		redirectURL = resp.Header.Get("Location")
+		resp.Body.Close()
+	} else if resp.StatusCode == 200 {
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		bodyStr := string(body)
 		if strings.Contains(bodyStr, "踢出会话") || strings.Contains(bodyStr, "kickout") {
 			c.log.Info("Session kick detected, continuing...")
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyStr))
 			if err == nil {
-				exec2, exists := doc.Find("input[name=execution]").Attr("value")
-				if exists {
+				if exec2, exists := doc.Find("input[name=execution]").Attr("value"); exists {
 					formData2 := url.Values{
 						"execution": {exec2},
 						"_eventId":  {"continue"},
 					}
-					resp2, err := c.doRequest(ctx, "POST", loginURL, "application/x-www-form-urlencoded", strings.NewReader(formData2.Encode()))
+					resp2, err := c.doRequest(ctx, "POST", postURL, "application/x-www-form-urlencoded", strings.NewReader(formData2.Encode()))
 					if err != nil {
 						return fmt.Errorf("continue after kick: %w", err)
 					}
-					resp.Body.Close()
-					resp = resp2
+					if resp2.StatusCode == 302 {
+						redirectURL = resp2.Header.Get("Location")
+					}
+					resp2.Body.Close()
 				}
 			}
 		}
-	}
-
-	// Step 5: Follow redirects to complete login
-	for resp.StatusCode == 302 {
-		loc := resp.Header.Get("Location")
+	} else {
 		resp.Body.Close()
-		if loc == "" {
-			break
-		}
-		resp, err = c.doRequest(ctx, "GET", loc, "", nil)
-		if err != nil {
-			return fmt.Errorf("follow redirect: %w", err)
+	}
+
+	// Step 5: Follow redirect with full redirect support (matching Python follow_redirects=True)
+	if redirectURL != "" {
+		if err := c.followAllRedirects(ctx, redirectURL); err != nil {
+			return fmt.Errorf("follow login redirect: %w", err)
 		}
 	}
-	resp.Body.Close()
 
-	// Verify session
+	// Verify session cookie on LMS domain
 	u, _ := url.Parse(lmsBase)
 	for _, ck := range c.http.Jar.Cookies(u) {
 		if ck.Name == "session" {
@@ -171,6 +176,39 @@ func (c *Client) login(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("login failed: session cookie not found")
+}
+
+// followAllRedirects follows ALL redirect types (301/302/303/307/308) until a non-redirect response.
+// This matches Python's follow_redirects=True behavior.
+func (c *Client) followAllRedirects(ctx context.Context, startURL string) error {
+	currentURL := startURL
+	for i := 0; i < 20; i++ { // max 20 redirects to prevent infinite loops
+		resp, err := c.doRequest(ctx, "GET", currentURL, "", nil)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		if !isRedirect(resp.StatusCode) {
+			return nil
+		}
+
+		loc := resp.Header.Get("Location")
+		if loc == "" {
+			return nil
+		}
+
+		// Resolve relative URLs
+		base, _ := url.Parse(currentURL)
+		ref, _ := url.Parse(loc)
+		currentURL = base.ResolveReference(ref).String()
+	}
+	return nil
+}
+
+func isRedirect(statusCode int) bool {
+	return statusCode == 301 || statusCode == 302 || statusCode == 303 ||
+		statusCode == 307 || statusCode == 308
 }
 
 // GetRollcalls fetches active rollcalls from LMS. Re-logins on 302/401.
@@ -196,7 +234,9 @@ func (c *Client) getRollcalls(ctx context.Context, canRetry bool) ([]Rollcall, e
 			}
 			return c.getRollcalls(ctx, false)
 		}
-		return nil, fmt.Errorf("session expired after re-login")
+		// Match Python: return empty list instead of error on second failure
+		c.log.Warn("Session still expired after re-login")
+		return []Rollcall{}, nil
 	}
 
 	if resp.StatusCode != 200 {
@@ -214,8 +254,6 @@ func (c *Client) getRollcalls(ctx context.Context, canRetry bool) ([]Rollcall, e
 }
 
 // DoCheckin submits a check-in for a rollcall.
-// type_ is "qr", "number", or "radar".
-// payload is the check-in data (will have deviceId added).
 func (c *Client) DoCheckin(ctx context.Context, rollcallID int, type_ string, payload map[string]interface{}) CheckinResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -263,36 +301,32 @@ func (c *Client) DoCheckin(ctx context.Context, rollcallID int, type_ string, pa
 	return CheckinResult{false, errDetail}
 }
 
-// getCallbackURL initiates the login redirect chain to get the CAS callback URL.
+// getCallbackURL follows up to 2 redirect hops from /login, matching Python's behavior.
 func (c *Client) getCallbackURL(ctx context.Context) (string, error) {
-	resp, err := c.doRequest(ctx, "GET", lmsBase+"/login", "", nil)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	// Follow redirects to collect the final callback URL
 	currentURL := lmsBase + "/login"
-	for resp.StatusCode == 302 {
-		loc := resp.Header.Get("Location")
-		resp.Body.Close()
-		if loc == "" {
-			break
-		}
-		// Resolve relative URLs
-		base, _ := url.Parse(currentURL)
-		ref, _ := url.Parse(loc)
-		resolved := base.ResolveReference(ref).String()
-		currentURL = resolved
 
-		resp, err = c.doRequest(ctx, "GET", resolved, "", nil)
+	for i := 0; i < 2; i++ {
+		resp, err := c.doRequest(ctx, "GET", currentURL, "", nil)
 		if err != nil {
 			return "", err
 		}
-	}
-	resp.Body.Close()
+		resp.Body.Close()
 
-	// The callback URL is the final URL we arrived at
+		if !isRedirect(resp.StatusCode) {
+			break
+		}
+
+		loc := resp.Header.Get("Location")
+		if loc == "" {
+			break
+		}
+
+		// Resolve relative URLs
+		base, _ := url.Parse(currentURL)
+		ref, _ := url.Parse(loc)
+		currentURL = base.ResolveReference(ref).String()
+	}
+
 	return currentURL, nil
 }
 
