@@ -12,6 +12,7 @@ import (
 
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/config"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/lms"
+	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/notify"
 )
 
 type WSClient struct {
@@ -54,6 +55,7 @@ func (w *WSClient) Run(ctx context.Context) {
 		}
 
 		w.log.Warn("WebSocket 断开，正在重连...", "error", err, "backoff", backoff)
+		notify.Sendf("⚠️ WebSocket 断开，%s 后重连", backoff)
 		select {
 		case <-ctx.Done():
 			return
@@ -179,6 +181,7 @@ func (w *WSClient) handleQRShare(ctx context.Context, msg map[string]interface{}
 			if result.Success {
 				success = true
 				w.log.Info("QR 共享签到成功", "rollcall_id", r.RollcallID)
+				notify.Sendf("✅ QR 共享签到成功\nrollcall_id: %d", r.RollcallID)
 			}
 		}
 	}
@@ -238,6 +241,7 @@ func (w *WSClient) handleNumberShare(ctx context.Context, msg map[string]interfa
 			if result.Success {
 				valid = true
 				w.log.Info("数字共享签到成功", "rollcall_id", rollcallID)
+				notify.Sendf("✅ 数字共享签到成功\nrollcall_id: %d", rollcallID)
 			} else {
 				w.addToInvalidCache(cacheKey)
 				w.log.Warn("数字共享签到失败", "rollcall_id", rollcallID, "error", result.ErrorCode)

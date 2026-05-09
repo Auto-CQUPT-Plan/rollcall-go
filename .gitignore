@@ -3,3 +3,4 @@ data/
 /center
 *.exe
 .DS_Store
+.env

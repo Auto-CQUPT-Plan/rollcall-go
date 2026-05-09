@@ -21,6 +21,8 @@ type Config struct {
 	CenterServerURL      string `json:"center_server_url"`
 	CenterServerSecret   string `json:"center_server_secret"`
 	AutoLocationCheckin  bool   `json:"auto_location_checkin"`
+	TGBotToken           string `json:"tg_bot_token"`
+	TGChatID             string `json:"tg_chat_id"`
 }
 
 var (
@@ -102,6 +104,12 @@ func applyEnvOverrides() {
 	if v := os.Getenv("EDGE_AUTO_LOCATION_CHECKIN"); v != "" {
 		lower := strings.ToLower(v)
 		Cfg.AutoLocationCheckin = lower == "true" || lower == "1" || lower == "yes"
+	}
+	if v := os.Getenv("TG_BOT_TOKEN"); v != "" {
+		Cfg.TGBotToken = v
+	}
+	if v := os.Getenv("TG_CHAT_ID"); v != "" {
+		Cfg.TGChatID = v
 	}
 }
 

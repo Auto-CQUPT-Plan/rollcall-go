@@ -12,6 +12,7 @@ import (
 
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/config"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/lms"
+	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/notify"
 )
 
 type CurriculumInstance struct {
@@ -105,6 +106,9 @@ func (p *Poller) pollOnce(ctx context.Context) {
 		return
 	}
 	p.log.Info("轮询中", "活跃签到", len(rollcalls))
+	if len(rollcalls) > 0 {
+		notify.Sendf("🔍 轮询中，发现 %d 个签到任务", len(rollcalls))
+	}
 
 	// Build rollcall_tasks message for center
 	hasQR := false
@@ -156,8 +160,10 @@ func (p *Poller) pollOnce(ctx context.Context) {
 							})
 							if result.Success {
 								p.log.Info("自动定位签到成功", "课程", r.CourseTitle)
+								notify.Sendf("✅ 自动定位签到成功\n课程: %s\n地点: %s", r.CourseTitle, inst.Location)
 							} else {
 								p.log.Warn("自动定位签到失败", "课程", r.CourseTitle, "error", result.ErrorCode)
+								notify.Sendf("❌ 自动定位签到失败\n课程: %s\n原因: %s", r.CourseTitle, result.ErrorCode)
 							}
 						} else {
 							p.log.Warn("未找到地点坐标", "地点", inst.Location)

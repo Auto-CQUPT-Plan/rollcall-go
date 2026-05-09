@@ -14,6 +14,7 @@ import (
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/edge"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/lms"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/logger"
+	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/notify"
 )
 
 func main() {
@@ -35,6 +36,7 @@ func main() {
 	lmsClient := lms.NewClient()
 	defer lmsClient.Close()
 
+	notify.Sendf("🟢 Edge Server 已启动\nclient_id: %s", config.ClientID[:8])
 	slog.Info("正在检查 LMS 会话...")
 	if _, err := lmsClient.GetRollcalls(ctx); err != nil {
 		slog.Warn("初始签到检查失败（稍后重试）", "error", err)

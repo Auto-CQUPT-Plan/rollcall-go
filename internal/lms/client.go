@@ -19,6 +19,7 @@ import (
 
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/config"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/crypto"
+	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/notify"
 )
 
 const (
@@ -170,6 +171,7 @@ func (c *Client) login(ctx context.Context) error {
 		if ck.Name == "session" {
 			c.saveCookies()
 			c.log.Info("IDS 登录成功")
+			notify.Send("🔑 IDS 登录成功")
 			return nil
 		}
 	}
