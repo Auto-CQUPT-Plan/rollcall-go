@@ -49,7 +49,7 @@ func Load() error {
 	cfgPath := filepath.Join(DataDir, "config.json")
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		if err := json.Unmarshal(data, &Cfg); err != nil {
-			slog.Warn("Failed to parse config.json, using defaults", "error", err)
+			slog.Warn("config.json 解析失败，使用默认值", "error", err)
 		}
 	}
 
@@ -62,7 +62,7 @@ func Load() error {
 
 	// Load or generate client ID
 	ClientID = loadClientID()
-	slog.Info("Configuration loaded", "client_id", ClientID)
+	slog.Info("配置已加载", "client_id", ClientID)
 
 	return nil
 }
@@ -121,7 +121,7 @@ func loadClientID() string {
 
 	id := uuid.New().String()
 	if err := os.WriteFile(idPath, []byte(id), 0o644); err != nil {
-		slog.Warn("Failed to save client_id", "error", err)
+		slog.Warn("client_id 保存失败", "error", err)
 	}
 	return id
 }

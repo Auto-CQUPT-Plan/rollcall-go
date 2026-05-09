@@ -83,7 +83,7 @@ func (c *Client) Login(ctx context.Context) error {
 }
 
 func (c *Client) login(ctx context.Context) error {
-	c.log.Info("Starting IDS login")
+	c.log.Info("正在登录 IDS")
 
 	// Clear cookies for fresh login
 	jar, _ := cookiejar.New(nil)
@@ -95,7 +95,6 @@ func (c *Client) login(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get callback url: %w", err)
 	}
-	c.log.Info("Callback URL obtained", "url", callbackURL)
 
 	// Step 2: GET IDS login page to extract salt and execution token
 	// Python uses: params={"service": str(callback_url)} which httpx appends as query param
@@ -135,7 +134,7 @@ func (c *Client) login(ctx context.Context) error {
 		resp.Body.Close()
 		bodyStr := string(body)
 		if strings.Contains(bodyStr, "踢出会话") || strings.Contains(bodyStr, "kickout") {
-			c.log.Info("Session kick detected, continuing...")
+			c.log.Info("检测到会话冲突，正在继续...")
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyStr))
 			if err == nil {
 				if exec2, exists := doc.Find("input[name=execution]").Attr("value"); exists {
@@ -170,7 +169,7 @@ func (c *Client) login(ctx context.Context) error {
 	for _, ck := range c.http.Jar.Cookies(u) {
 		if ck.Name == "session" {
 			c.saveCookies()
-			c.log.Info("Login successful")
+			c.log.Info("IDS 登录成功")
 			return nil
 		}
 	}
@@ -228,14 +227,14 @@ func (c *Client) getRollcalls(ctx context.Context, canRetry bool) ([]Rollcall, e
 
 	if resp.StatusCode == 302 || resp.StatusCode == 401 {
 		if canRetry {
-			c.log.Info("Session expired, re-logging in")
+			c.log.Info("会话已过期，正在重新登录")
 			if err := c.login(ctx); err != nil {
 				return nil, fmt.Errorf("re-login: %w", err)
 			}
 			return c.getRollcalls(ctx, false)
 		}
 		// Match Python: return empty list instead of error on second failure
-		c.log.Warn("Session still expired after re-login")
+		c.log.Warn("重新登录后会话仍然无效")
 		return []Rollcall{}, nil
 	}
 
@@ -275,7 +274,7 @@ func (c *Client) DoCheckin(ctx context.Context, rollcallID int, type_ string, pa
 
 	resp, err := c.doRequest(ctx, "PUT", endpoint, "application/json", bytes.NewReader(body))
 	if err != nil {
-		c.log.Error("Checkin request failed", "error", err)
+		c.log.Error("签到请求失败", "error", err)
 		return CheckinResult{false, err.Error()}
 	}
 	defer resp.Body.Close()
@@ -287,7 +286,7 @@ func (c *Client) DoCheckin(ctx context.Context, rollcallID int, type_ string, pa
 
 	status, _ := result["status"].(string)
 	if resp.StatusCode == 200 && status == "on_call" {
-		c.log.Info("Checkin successful", "rollcall_id", rollcallID, "type", type_)
+		c.log.Info("签到成功", "rollcall_id", rollcallID, "type", type_)
 		return CheckinResult{true, ""}
 	}
 
@@ -297,7 +296,7 @@ func (c *Client) DoCheckin(ctx context.Context, rollcallID int, type_ string, pa
 	if errDetail == "" {
 		errDetail = msg
 	}
-	c.log.Warn("Checkin failed", "rollcall_id", rollcallID, "type", type_, "error", errDetail)
+	c.log.Warn("签到失败", "rollcall_id", rollcallID, "type", type_, "error", errDetail)
 	return CheckinResult{false, errDetail}
 }
 
@@ -386,7 +385,7 @@ func (c *Client) loadCookies() {
 		})
 	}
 	c.http.Jar.SetCookies(u, httpCookies)
-	c.log.Info("Loaded saved cookies", "count", len(httpCookies))
+	c.log.Info("已加载保存的 Cookie", "数量", len(httpCookies))
 }
 
 func (c *Client) saveCookies() {
@@ -405,10 +404,10 @@ func (c *Client) saveCookies() {
 
 	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {
-		c.log.Warn("Failed to marshal cookies", "error", err)
+		c.log.Warn("Cookie 序列化失败", "error", err)
 		return
 	}
 	if err := os.WriteFile(config.CookiesPath(), data, 0o644); err != nil {
-		c.log.Warn("Failed to save cookies", "error", err)
+		c.log.Warn("Cookie 保存失败", "error", err)
 	}
 }

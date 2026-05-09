@@ -107,7 +107,7 @@ func (s *Server) getStatusPayload() map[string]interface{} {
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.log.Error("WebSocket upgrade failed", "error", err)
+		s.log.Error("WebSocket 升级失败", "error", err)
 		return
 	}
 	defer conn.Close()
@@ -115,7 +115,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Wait for register message
 	clientID, err := s.handleRegister(r.Context(), conn)
 	if err != nil {
-		s.log.Warn("Registration failed", "error", err)
+		s.log.Warn("注册失败", "error", err)
 		conn.WriteJSON(map[string]interface{}{
 			"type":    "error",
 			"message": err.Error(),
@@ -135,7 +135,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, msgData, err := conn.ReadMessage()
 		if err != nil {
-			s.log.Info("Client read error", "client_id", clientID, "error", err)
+			s.log.Info("客户端读取错误", "client_id", clientID, "error", err)
 			return
 		}
 
@@ -169,7 +169,7 @@ func (s *Server) handleRegister(ctx context.Context, conn *websocket.Conn) (stri
 		return "", fmt.Errorf("invalid secret")
 	}
 
-	s.log.Info("Client registered", "client_id", clientID)
+	s.log.Info("客户端已注册", "client_id", clientID)
 	return clientID, nil
 }
 
@@ -179,7 +179,7 @@ func (s *Server) verifySecret(secret, clientID string) bool {
 		url := fmt.Sprintf("%s?secret=%s&uuid=%s", s.externalSecretController, secret, clientID)
 		resp, err := client.Get(url)
 		if err != nil {
-			s.log.Error("External secret verification failed", "error", err)
+			s.log.Error("外部密钥验证失败", "error", err)
 			return false
 		}
 		defer resp.Body.Close()
@@ -197,7 +197,7 @@ func (s *Server) verifySecret(secret, clientID string) bool {
 func (s *Server) handleClientMessage(conn *websocket.Conn, clientID string, msg map[string]interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.log.Error("Panic in message handler", "client_id", clientID, "panic", r)
+			s.log.Error("消息处理异常", "client_id", clientID, "panic", r)
 		}
 	}()
 
@@ -340,7 +340,7 @@ func (s *Server) handleRollcallSuccess(clientID string, msg map[string]interface
 func (s *Server) handleWSStatus(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.log.Error("Status WebSocket upgrade failed", "error", err)
+		s.log.Error("状态 WebSocket 升级失败", "error", err)
 		return
 	}
 	defer conn.Close()

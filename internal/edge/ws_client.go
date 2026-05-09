@@ -34,7 +34,7 @@ func NewWSClient(lmsClient *lms.Client, poller *Poller) *WSClient {
 // Run connects to the center server and processes messages with exponential backoff reconnection.
 func (w *WSClient) Run(ctx context.Context) {
 	if config.Cfg.CenterServerURL == "" {
-		w.log.Info("Center server URL not configured, WebSocket client disabled")
+		w.log.Info("未配置 Center 服务器，WebSocket 已禁用")
 		return
 	}
 
@@ -53,7 +53,7 @@ func (w *WSClient) Run(ctx context.Context) {
 			return
 		}
 
-		w.log.Warn("WebSocket disconnected, reconnecting...", "error", err, "backoff", backoff)
+		w.log.Warn("WebSocket 断开，正在重连...", "error", err, "backoff", backoff)
 		select {
 		case <-ctx.Done():
 			return
@@ -65,7 +65,7 @@ func (w *WSClient) Run(ctx context.Context) {
 }
 
 func (w *WSClient) connectAndProcess(ctx context.Context) error {
-	w.log.Info("Connecting to center server", "url", config.Cfg.CenterServerURL)
+	w.log.Info("正在连接 Center 服务器", "地址", config.Cfg.CenterServerURL)
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
@@ -95,7 +95,7 @@ func (w *WSClient) connectAndProcess(ctx context.Context) error {
 	if err := conn.WriteJSON(reg); err != nil {
 		return err
 	}
-	w.log.Info("Registered with center server")
+	w.log.Info("已注册到 Center 服务器")
 
 	// [Fix #5] Trigger poll immediately after registration to sync tasks
 	w.poller.TriggerPoll()
@@ -120,7 +120,7 @@ func (w *WSClient) connectAndProcess(ctx context.Context) error {
 func (w *WSClient) handleMessage(ctx context.Context, msg map[string]interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
-			w.log.Error("Panic in message handler", "panic", r)
+			w.log.Error("消息处理异常", "panic", r)
 		}
 	}()
 
@@ -133,7 +133,7 @@ func (w *WSClient) handleMessage(ctx context.Context, msg map[string]interface{}
 	fromClientID, _ := msg["from_client_id"].(string)
 
 	if config.PauseSharedRollcall.Load() {
-		w.log.Info("Shared rollcall paused, ignoring", "type", rollcallType)
+		w.log.Info("共享签到已暂停，忽略", "类型", rollcallType)
 		return
 	}
 
@@ -150,20 +150,20 @@ func (w *WSClient) handleQRShare(ctx context.Context, msg map[string]interface{}
 	cacheKey := "qr:" + rawQR
 
 	if w.isInInvalidCache(cacheKey) {
-		w.log.Info("Skipping QR checkin (in invalid cache)", "raw", rawQR)
+		w.log.Info("跳过 QR 签到（已缓存为无效）", "raw", rawQR)
 		return
 	}
 
 	qrData := ExtractQRData(rawQR)
 	if qrData == "" {
-		w.log.Warn("Invalid QR data from center", "raw", rawQR)
+		w.log.Warn("收到无效的 QR 数据", "raw", rawQR)
 		w.addToInvalidCache(cacheKey)
 		return
 	}
 
 	rollcalls, err := w.lmsClient.GetRollcalls(ctx)
 	if err != nil {
-		w.log.Error("Failed to get rollcalls for QR share", "error", err)
+		w.log.Error("获取签到列表失败（QR 共享）", "error", err)
 		return
 	}
 
@@ -178,7 +178,7 @@ func (w *WSClient) handleQRShare(ctx context.Context, msg map[string]interface{}
 			})
 			if result.Success {
 				success = true
-				w.log.Info("QR share checkin successful", "rollcall_id", r.RollcallID)
+				w.log.Info("QR 共享签到成功", "rollcall_id", r.RollcallID)
 			}
 		}
 	}
@@ -216,13 +216,13 @@ func (w *WSClient) handleNumberShare(ctx context.Context, msg map[string]interfa
 	cacheKey := fmt.Sprintf("num:%d:%d", rollcallID, number)
 
 	if w.isInInvalidCache(cacheKey) {
-		w.log.Info("Skipping number checkin (in invalid cache)", "rollcall_id", rollcallID, "number", number)
+		w.log.Info("跳过数字签到（已缓存为无效）", "rollcall_id", rollcallID, "number", number)
 		return
 	}
 
 	rollcalls, err := w.lmsClient.GetRollcalls(ctx)
 	if err != nil {
-		w.log.Error("Failed to get rollcalls for number share", "error", err)
+		w.log.Error("获取签到列表失败（数字共享）", "error", err)
 		return
 	}
 
@@ -237,10 +237,10 @@ func (w *WSClient) handleNumberShare(ctx context.Context, msg map[string]interfa
 			})
 			if result.Success {
 				valid = true
-				w.log.Info("Number share checkin successful", "rollcall_id", rollcallID)
+				w.log.Info("数字共享签到成功", "rollcall_id", rollcallID)
 			} else {
 				w.addToInvalidCache(cacheKey)
-				w.log.Warn("Number share checkin failed", "rollcall_id", rollcallID, "error", result.ErrorCode)
+				w.log.Warn("数字共享签到失败", "rollcall_id", rollcallID, "error", result.ErrorCode)
 			}
 			break
 		}
@@ -277,12 +277,12 @@ func (w *WSClient) SendToCenter(msg map[string]interface{}) {
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		w.log.Error("Failed to marshal message", "error", err)
+		w.log.Error("消息序列化失败", "error", err)
 		return
 	}
 
 	if err := w.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		w.log.Warn("Failed to send to center", "error", err)
+		w.log.Warn("发送到 Center 失败", "error", err)
 	}
 }
 

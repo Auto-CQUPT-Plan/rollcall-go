@@ -33,7 +33,7 @@ func (m *ConnectionManager) Connect(conn *websocket.Conn, clientID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.connections[conn] = &connEntry{conn: conn, clientID: clientID}
-	m.log.Info("Client connected", "client_id", clientID, "total", len(m.connections))
+	m.log.Info("客户端已连接", "client_id", clientID, "总数", len(m.connections))
 }
 
 func (m *ConnectionManager) Disconnect(conn *websocket.Conn) string {
@@ -45,7 +45,7 @@ func (m *ConnectionManager) Disconnect(conn *websocket.Conn) string {
 		clientID = entry.clientID
 	}
 	delete(m.connections, conn)
-	m.log.Info("Client disconnected", "client_id", clientID, "total", len(m.connections))
+	m.log.Info("客户端已断开", "client_id", clientID, "总数", len(m.connections))
 	return clientID
 }
 

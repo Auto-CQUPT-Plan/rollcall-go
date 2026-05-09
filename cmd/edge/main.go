@@ -13,35 +13,31 @@ import (
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/config"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/edge"
 	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/lms"
+	"github.com/Auto-CQUPT-Plan/rollcall-go/internal/logger"
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	logger.Setup(os.Stdout)
 
 	if err := config.Load(); err != nil {
-		slog.Error("Failed to load config", "error", err)
+		slog.Error("配置加载失败", "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("Starting Edge Server", "client_id", config.ClientID)
+	slog.Info("Edge Server 启动中", "client_id", config.ClientID[:8])
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle signals for graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Initialize components
 	lmsClient := lms.NewClient()
 	defer lmsClient.Close()
 
-	// Try initial login / session check
-	slog.Info("Checking LMS session...")
+	slog.Info("正在检查 LMS 会话...")
 	if _, err := lmsClient.GetRollcalls(ctx); err != nil {
-		slog.Warn("Initial rollcall check failed (will retry)", "error", err)
+		slog.Warn("初始签到检查失败（稍后重试）", "error", err)
 	}
 
 	poller := edge.NewPoller(lmsClient)
@@ -49,11 +45,10 @@ func main() {
 	poller.SetSendFunc(wsClient.SendToCenter)
 	server := edge.NewServer(lmsClient, wsClient, poller)
 
-	// Start background goroutines
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("Panic in poller", "panic", r)
+				slog.Error("轮询器崩溃", "panic", r)
 			}
 		}()
 		poller.Run(ctx)
@@ -62,13 +57,12 @@ func main() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("Panic in ws_client", "panic", r)
+				slog.Error("WebSocket 客户端崩溃", "panic", r)
 			}
 		}()
 		wsClient.Run(ctx)
 	}()
 
-	// Start HTTP server if configured
 	if config.Cfg.HTTPPort != nil {
 		addr := fmt.Sprintf(":%d", *config.Cfg.HTTPPort)
 		httpServer := &http.Server{
@@ -80,26 +74,24 @@ func main() {
 		}
 
 		go func() {
-			slog.Info("HTTP server listening", "addr", addr)
+			slog.Info("HTTP 服务已启动", "地址", addr)
 			if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
-				slog.Error("HTTP server error", "error", err)
+				slog.Error("HTTP 服务异常", "error", err)
 			}
 		}()
 
-		// Wait for signal
 		sig := <-sigCh
-		slog.Info("Received signal, shutting down...", "signal", sig)
+		slog.Info("收到信号，正在关闭...", "signal", sig)
 		cancel()
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 		httpServer.Shutdown(shutdownCtx)
 	} else {
-		// No HTTP, just wait for signal
 		sig := <-sigCh
-		slog.Info("Received signal, shutting down...", "signal", sig)
+		slog.Info("收到信号，正在关闭...", "signal", sig)
 		cancel()
 	}
 
-	slog.Info("Edge Server stopped")
+	slog.Info("Edge Server 已停止")
 }

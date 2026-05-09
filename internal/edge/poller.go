@@ -74,7 +74,7 @@ func (p *Poller) Run(ctx context.Context) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					p.log.Error("Panic in poller", "panic", r)
+					p.log.Error("轮询器异常", "panic", r)
 				}
 			}()
 			p.pollOnce(ctx)
@@ -101,10 +101,10 @@ func (p *Poller) pollOnce(ctx context.Context) {
 
 	rollcalls, err := p.lmsClient.GetRollcalls(ctx)
 	if err != nil {
-		p.log.Error("Failed to get rollcalls", "error", err)
+		p.log.Error("获取签到列表失败", "error", err)
 		return
 	}
-	p.log.Info("Polling", "active_rollcalls", len(rollcalls))
+	p.log.Info("轮询中", "活跃签到", len(rollcalls))
 
 	// Build rollcall_tasks message for center
 	hasQR := false
@@ -142,25 +142,25 @@ func (p *Poller) pollOnce(ctx context.Context) {
 			for _, r := range rollcalls {
 				if r.Source == "radar" && r.Status == "absent" {
 					if r.CourseTitle != inst.Course {
-						p.log.Warn("Auto-radar: time match but course name differs",
-							"curriculum_course", inst.Course, "rollcall_course", r.CourseTitle)
+						p.log.Warn("自动定位: 时间匹配但课程名不同",
+							"课表课程", inst.Course, "签到课程", r.CourseTitle)
 					}
 
 					if inst.Location != "" {
 						coords := GetLocationCoords(inst.Location)
 						if coords != nil {
-							p.log.Info("Auto-radar check-in", "course", inst.Course, "location", inst.Location)
+							p.log.Info("自动定位签到中", "课程", inst.Course, "地点", inst.Location)
 							result := p.lmsClient.DoCheckin(ctx, r.RollcallID, "radar", map[string]interface{}{
 								"lat": coords.Lat,
 								"lon": coords.Lon,
 							})
 							if result.Success {
-								p.log.Info("Auto-radar success", "course", r.CourseTitle)
+								p.log.Info("自动定位签到成功", "课程", r.CourseTitle)
 							} else {
-								p.log.Warn("Auto-radar failed", "course", r.CourseTitle, "error", result.ErrorCode)
+								p.log.Warn("自动定位签到失败", "课程", r.CourseTitle, "error", result.ErrorCode)
 							}
 						} else {
-							p.log.Warn("No coordinates for location", "location", inst.Location)
+							p.log.Warn("未找到地点坐标", "地点", inst.Location)
 						}
 					}
 				}
@@ -277,30 +277,30 @@ func (p *Poller) fetchCurriculum(ctx context.Context) {
 		return
 	}
 
-	p.log.Info("Fetching curriculum from API")
+	p.log.Info("正在获取课表")
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", config.Cfg.CurriculumAPI, nil)
 	if err != nil {
-		p.log.Error("Failed to create curriculum request", "error", err)
+		p.log.Error("创建课表请求失败", "error", err)
 		return
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		p.log.Error("Failed to fetch curriculum", "error", err)
+		p.log.Error("获取课表失败", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		p.log.Error("Curriculum API returned non-200", "status", resp.StatusCode)
+		p.log.Error("课表 API 返回异常", "状态码", resp.StatusCode)
 		return
 	}
 
 	var data CurriculumData
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		p.log.Error("Failed to decode curriculum", "error", err)
+		p.log.Error("课表解析失败", "error", err)
 		return
 	}
 
@@ -316,10 +316,10 @@ func (p *Poller) fetchCurriculum(ctx context.Context) {
 	}
 	cacheData, _ := json.MarshalIndent(cache, "", "  ")
 	if err := os.WriteFile(config.CurriculumCachePath(), cacheData, 0o644); err != nil {
-		p.log.Warn("Failed to save curriculum cache", "error", err)
+		p.log.Warn("课表缓存保存失败", "error", err)
 	}
 
-	p.log.Info("Curriculum updated", "instances", len(data.Instances))
+	p.log.Info("课表已更新", "课程数", len(data.Instances))
 }
 
 func (p *Poller) loadCurriculumFromFile() {
@@ -330,7 +330,7 @@ func (p *Poller) loadCurriculumFromFile() {
 
 	var cache curriculumCache
 	if err := json.Unmarshal(data, &cache); err != nil {
-		p.log.Warn("Failed to parse curriculum cache", "error", err)
+		p.log.Warn("课表缓存解析失败", "error", err)
 		return
 	}
 
@@ -341,7 +341,7 @@ func (p *Poller) loadCurriculumFromFile() {
 	}
 	p.mu.Unlock()
 
-	p.log.Info("Loaded curriculum from cache")
+	p.log.Info("已从缓存加载课表")
 }
 
 func parseTimeRange(dateStr, startStr, endStr string) (time.Time, time.Time, error) {
