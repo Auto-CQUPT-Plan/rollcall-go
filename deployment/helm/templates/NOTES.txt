@@ -1,0 +1,9 @@
+1. 获取 Edge Server 状态：
+   kubectl port-forward svc/{{ include "rollcall-go.fullname" . }} {{ .Values.edge.servicePort }}:{{ .Values.edge.servicePort }}
+   然后访问 http://localhost:{{ .Values.edge.servicePort }}/health
+
+2. 查看 Pod 日志：
+   kubectl logs -l app.kubernetes.io/name={{ include "rollcall-go.name" . }} -f
+
+3. 更新配置后重启：
+   helm upgrade {{ .Release.Name }} . -f values.yaml

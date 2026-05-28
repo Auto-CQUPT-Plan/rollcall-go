@@ -1,0 +1,121 @@
+# ============================================================
+# rollcall-go Helm Chart 全局配置
+# ============================================================
+
+# 镜像配置
+image:
+  registry: ""
+  repository: rollcall-go
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# 全局名称前缀
+nameOverride: ""
+fullnameOverride: ""
+
+# ============================================================
+# Edge Server 配置
+# ============================================================
+edge:
+  # 副本数
+  replicas: 1
+
+  # 容器端口
+  servicePort: 8080
+
+  # 资源限制
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # 生存/就绪探针
+  livenessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # 节点选择
+  nodeSelector: {}
+
+  # 容忍度
+  tolerations: []
+
+  # 亲和性
+  affinity: {}
+
+  # Pod 注解
+  podAnnotations: {}
+
+  # Pod 标签
+  podLabels: {}
+
+  # 额外环境变量
+  extraEnv: []
+
+  # 额外卷挂载
+  extraVolumeMounts: []
+
+  # 额外卷
+  extraVolumes: []
+
+# ============================================================
+# 应用配置（注入到环境变量）
+# ============================================================
+config:
+  # IDS 账号（必填）
+  edgeUsername: ""
+  edgePassword: ""
+
+  # 课表 API
+  curriculumApi: ""
+
+  # Center 服务器连接
+  centerServerUrl: ""
+  centerServerSecret: ""
+
+  # 自动定位签到
+  autoLocationCheckin: true
+
+  # 自动数字签到
+  autoNumberCheckin: true
+
+  # Telegram 通知（可选）
+  tgBotToken: ""
+  tgChatId: ""
+
+# ============================================================
+# 存储配置
+# ============================================================
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  existingClaim: ""
+  annotations: {}
+
+# ============================================================
+# Service 配置
+# ============================================================
+service:
+  type: ClusterIP
+  annotations: {}
+  loadBalancerIP: ""
+  clusterIP: ""
+  nodePort: {}

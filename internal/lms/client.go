@@ -42,6 +42,16 @@ type CheckinResult struct {
 	ErrorCode string
 }
 
+type StudentRollcall struct {
+	Status string `json:"status"`
+}
+
+type StudentRollcallsData struct {
+	IsNumber     bool              `json:"is_number"`
+	NumberCode   int               `json:"number_code"`
+	RollcallList []StudentRollcall `json:"student_rollcalls"`
+}
+
 type Client struct {
 	http *http.Client
 	mu   sync.Mutex
@@ -300,6 +310,46 @@ func (c *Client) DoCheckin(ctx context.Context, rollcallID int, type_ string, pa
 	}
 	c.log.Warn("签到失败", "rollcall_id", rollcallID, "type", type_, "error", errDetail)
 	return CheckinResult{false, errDetail}
+}
+
+// GetStudentRollcalls fetches student rollcalls details for a rollcall. Re-logins on 302/401.
+func (c *Client) GetStudentRollcalls(ctx context.Context, rollcallID int) (*StudentRollcallsData, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.getStudentRollcalls(ctx, rollcallID, true)
+}
+
+func (c *Client) getStudentRollcalls(ctx context.Context, rollcallID int, canRetry bool) (*StudentRollcallsData, error) {
+	apiURL := fmt.Sprintf("%s/api/rollcall/%d/student_rollcalls", lmsBase, rollcallID)
+	resp, err := c.doRequest(ctx, "GET", apiURL, "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("get student rollcalls: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 302 || resp.StatusCode == 401 {
+		if canRetry {
+			c.log.Info("会话已过期，正在重新登录")
+			if err := c.login(ctx); err != nil {
+				return nil, fmt.Errorf("re-login: %w", err)
+			}
+			return c.getStudentRollcalls(ctx, rollcallID, false)
+		}
+		// Match Python: return nil instead of error on second failure
+		c.log.Warn("重新登录后会话仍然无效")
+		return nil, nil
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	var result StudentRollcallsData
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode student rollcalls: %w", err)
+	}
+
+	return &result, nil
 }
 
 // getCallbackURL follows up to 2 redirect hops from /login, matching Python's behavior.

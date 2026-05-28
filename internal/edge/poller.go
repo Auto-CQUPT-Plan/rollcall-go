@@ -37,20 +37,26 @@ type curriculumCache struct {
 type SendToCenterFunc func(msg map[string]interface{})
 
 type Poller struct {
-	lmsClient      *lms.Client
-	sendToCenter   SendToCenterFunc
-	curriculum     *CurriculumData
-	lastFetch      time.Time
-	mu             sync.RWMutex
-	triggerCh      chan struct{}
-	log            *slog.Logger
+	lmsClient          *lms.Client
+	sendToCenter       SendToCenterFunc
+	curriculum         *CurriculumData
+	lastFetch          time.Time
+	mu                 sync.RWMutex
+	triggerCh          chan struct{}
+	log                *slog.Logger
+	activeRollcalls    map[int]lms.Rollcall // 用于跟踪活跃签到，避免重复打印
+	completedRollcalls map[int]bool         // 用于跟踪已完成签到，避免重复打印
+	pollLogCache       map[string]int       // 用于缓存重复日志的计数
 }
 
 func NewPoller(lmsClient *lms.Client) *Poller {
 	return &Poller{
-		lmsClient: lmsClient,
-		triggerCh: make(chan struct{}, 1),
-		log:       slog.With("component", "poller"),
+		lmsClient:          lmsClient,
+		triggerCh:          make(chan struct{}, 1),
+		log:                slog.With("component", "poller"),
+		activeRollcalls:    make(map[int]lms.Rollcall),
+		completedRollcalls: make(map[int]bool),
+		pollLogCache:       make(map[string]int),
 	}
 }
 
@@ -102,13 +108,41 @@ func (p *Poller) pollOnce(ctx context.Context) {
 
 	rollcalls, err := p.lmsClient.GetRollcalls(ctx)
 	if err != nil {
-		p.log.Error("获取签到列表失败", "error", err)
+		logKey := "get_rollcalls_error:" + err.Error()
+		p.mu.Lock()
+		p.pollLogCache[logKey]++
+		count := p.pollLogCache[logKey]
+		p.mu.Unlock()
+		if count == 1 {
+			p.log.Error("获取签到列表失败", "error", err)
+		} else {
+			p.log.Error("获取签到列表失败", "error", err, "Count", count)
+		}
 		return
 	}
-	p.log.Info("轮询中", "活跃签到", len(rollcalls))
-	if len(rollcalls) > 0 {
-		notify.Sendf("🔍 轮询中，发现 %d 个签到任务", len(rollcalls))
+
+	// 处理活跃签到，只打印一次
+	p.mu.Lock()
+	// 检查是否有新的活跃签到
+	newActiveRollcalls := make(map[int]lms.Rollcall)
+	for _, r := range rollcalls {
+		newActiveRollcalls[r.RollcallID] = r
+		if _, exists := p.activeRollcalls[r.RollcallID]; !exists && r.Status == "absent" {
+			p.log.Info("发现活跃签到", "rollcall_id", r.RollcallID, "source", r.Source, "course", r.CourseTitle)
+			notify.Sendf("🔍 发现活跃签到\n课程: %s\n类型: %s", r.CourseTitle, r.Source)
+		}
 	}
+	// 检查是否有签到完成
+	for id, r := range p.activeRollcalls {
+		if newR, exists := newActiveRollcalls[id]; exists && newR.Status != "absent" && !p.completedRollcalls[id] {
+			p.completedRollcalls[id] = true
+			p.log.Info("签到完成", "rollcall_id", id, "source", r.Source, "course", r.CourseTitle)
+			notify.Sendf("✅ 签到完成\n课程: %s\n类型: %s", r.CourseTitle, r.Source)
+		}
+	}
+	// 更新活跃签到列表
+	p.activeRollcalls = newActiveRollcalls
+	p.mu.Unlock()
 
 	// Build rollcall_tasks message for center
 	hasQR := false
@@ -162,11 +196,102 @@ func (p *Poller) pollOnce(ctx context.Context) {
 								p.log.Info("自动定位签到成功", "课程", r.CourseTitle)
 								notify.Sendf("✅ 自动定位签到成功\n课程: %s\n地点: %s", r.CourseTitle, inst.Location)
 							} else {
-								p.log.Warn("自动定位签到失败", "课程", r.CourseTitle, "error", result.ErrorCode)
-								notify.Sendf("❌ 自动定位签到失败\n课程: %s\n原因: %s", r.CourseTitle, result.ErrorCode)
+								logKey := fmt.Sprintf("radar_checkin_failed:%d:%s", r.RollcallID, result.ErrorCode)
+								p.mu.Lock()
+								p.pollLogCache[logKey]++
+								count := p.pollLogCache[logKey]
+								p.mu.Unlock()
+								if count == 1 {
+									p.log.Warn("自动定位签到失败", "课程", r.CourseTitle, "error", result.ErrorCode)
+									notify.Sendf("❌ 自动定位签到失败\n课程: %s\n原因: %s", r.CourseTitle, result.ErrorCode)
+								} else {
+									p.log.Warn("自动定位签到失败", "课程", r.CourseTitle, "error", result.ErrorCode, "Count", count)
+								}
 							}
 						} else {
-							p.log.Warn("未找到地点坐标", "地点", inst.Location)
+							logKey := "location_coords_not_found:" + inst.Location
+							p.mu.Lock()
+							p.pollLogCache[logKey]++
+							count := p.pollLogCache[logKey]
+							p.mu.Unlock()
+							if count == 1 {
+								p.log.Warn("未找到地点坐标", "地点", inst.Location)
+							} else {
+								p.log.Warn("未找到地点坐标", "地点", inst.Location, "Count", count)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Auto number check-in
+	if config.Cfg.AutoNumberCheckin {
+		for _, r := range rollcalls {
+			if r.Source == "number" && r.Status == "absent" {
+				p.log.Info("自动数字签到: 发现未完成任务", "rollcall_id", r.RollcallID, "course", r.CourseTitle)
+				studentData, err := p.lmsClient.GetStudentRollcalls(ctx, r.RollcallID)
+				if err != nil {
+					logKey := fmt.Sprintf("get_student_rollcalls_error:%d:%s", r.RollcallID, err.Error())
+					p.mu.Lock()
+					p.pollLogCache[logKey]++
+					count := p.pollLogCache[logKey]
+					p.mu.Unlock()
+					if count == 1 {
+						p.log.Error("获取学生签到详情失败", "rollcall_id", r.RollcallID, "error", err)
+					} else {
+						p.log.Error("获取学生签到详情失败", "rollcall_id", r.RollcallID, "error", err, "Count", count)
+					}
+					continue
+				}
+				if studentData != nil {
+					// 计算已签到人数
+					checkedInCount := 0
+					for _, sr := range studentData.RollcallList {
+						if sr.Status == "on_call" {
+							checkedInCount++
+						}
+					}
+					p.log.Info("自动数字签到: 检查任务状态", "rollcall_id", r.RollcallID,
+						"is_number", studentData.IsNumber, "number_code", studentData.NumberCode,
+						"checked_in_count", checkedInCount)
+					if studentData.IsNumber && studentData.NumberCode > 0 && checkedInCount > 0 {
+						p.log.Info("自动数字签到: 发现有人已签到，提交签到码",
+							"rollcall_id", r.RollcallID, "number_code", studentData.NumberCode)
+						result := p.lmsClient.DoCheckin(ctx, r.RollcallID, "number", map[string]interface{}{
+							"numberCode": fmt.Sprintf("%d", studentData.NumberCode),
+						})
+						if result.Success {
+							p.log.Info("自动数字签到成功", "课程", r.CourseTitle, "rollcall_id", r.RollcallID)
+							notify.Sendf("✅ 自动数字签到成功\n课程: %s\n签到码: %d", r.CourseTitle, studentData.NumberCode)
+							// 发送成功信息到中心服务器
+							if p.sendToCenter != nil {
+								courseLocation := p.getCourseLocationForRollcall(r)
+								p.sendToCenter(map[string]interface{}{
+									"type":            "rollcall_success",
+									"client_id":       config.ClientID,
+									"rollcall_type":   "number",
+									"course_title":    r.CourseTitle,
+									"course_location": courseLocation,
+									"rollcall_id":     r.RollcallID,
+									"rollcall_number": studentData.NumberCode,
+									"timestamp":       time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+								})
+							}
+							p.TriggerPoll()
+						} else {
+							logKey := fmt.Sprintf("number_checkin_failed:%d:%s", r.RollcallID, result.ErrorCode)
+							p.mu.Lock()
+							p.pollLogCache[logKey]++
+							count := p.pollLogCache[logKey]
+							p.mu.Unlock()
+							if count == 1 {
+								p.log.Warn("自动数字签到失败", "课程", r.CourseTitle, "error", result.ErrorCode)
+								notify.Sendf("❌ 自动数字签到失败\n课程: %s\n原因: %s", r.CourseTitle, result.ErrorCode)
+							} else {
+								p.log.Warn("自动数字签到失败", "课程", r.CourseTitle, "error", result.ErrorCode, "Count", count)
+							}
 						}
 					}
 				}
@@ -182,9 +307,9 @@ func (p *Poller) shouldPoll() bool {
 	if config.Cfg.CurriculumAPI == "" {
 		// Default windows
 		windows := [][2]int{
-			{7*60 + 50, 12 * 60},       // 7:50-12:00
-			{13*60 + 50, 18 * 60},      // 13:50-18:00
-			{18*60 + 50, 22*60 + 40},   // 18:50-22:40
+			{7*60 + 50, 12 * 60},     // 7:50-12:00
+			{13*60 + 50, 18 * 60},    // 13:50-18:00
+			{18*60 + 50, 22*60 + 40}, // 18:50-22:40
 		}
 		for _, w := range windows {
 			if nowTime >= w[0] && nowTime <= w[1] {

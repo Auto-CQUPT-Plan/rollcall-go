@@ -1,0 +1,13 @@
+apiVersion: v2
+name: rollcall-go
+description: 重庆邮电大学自动签到系统 Helm Chart
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - cqupt
+  - rollcall
+  - auto-checkin
+home: https://github.com/Auto-CQUPT-Plan/rollcall-go
+sources:
+  - https://github.com/Auto-CQUPT-Plan/rollcall-go

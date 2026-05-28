@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rollcall-go.fullname" . }}-config
+  labels:
+    {{- include "rollcall-go.labels" . | nindent 4 }}
+data:
+  EDGE_CURRICULUM_API: {{ .Values.config.curriculumApi | default "" | quote }}
+  EDGE_HTTP_PORT: ""
+  EDGE_CENTER_SERVER_URL: {{ .Values.config.centerServerUrl | default "wss://cqupt.ishub.top/api/rollcall/ws" | quote }}
+  EDGE_AUTO_LOCATION_CHECKIN: {{ .Values.config.autoLocationCheckin | default true | quote }}
+  EDGE_AUTO_NUMBER_CHECKIN: {{ .Values.config.autoNumberCheckin | default true | quote }}
