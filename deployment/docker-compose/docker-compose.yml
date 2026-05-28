@@ -2,7 +2,7 @@ services:
   edge-server:
     build:
       context: .
-      dockerfile: Dockerfile.edge
+      dockerfile: ../../Dockerfile.edge
     volumes:
       - ./data:/app/data
     environment:
@@ -13,6 +13,7 @@ services:
       - EDGE_CENTER_SERVER_URL=${EDGE_CENTER_SERVER_URL:-wss://cqupt.ishub.top/api/rollcall/ws}
       - EDGE_CENTER_SERVER_SECRET=${EDGE_CENTER_SERVER_SECRET:-}
       - EDGE_AUTO_LOCATION_CHECKIN=${EDGE_AUTO_LOCATION_CHECKIN:-true}
+      - EDGE_AUTO_NUMBER_CHECKIN=${EDGE_AUTO_NUMBER_CHECKIN:-true}
       - TG_BOT_TOKEN=${TG_BOT_TOKEN:-}
       - TG_CHAT_ID=${TG_CHAT_ID:-}
     restart: unless-stopped

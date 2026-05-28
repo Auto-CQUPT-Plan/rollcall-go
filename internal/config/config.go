@@ -21,6 +21,7 @@ type Config struct {
 	CenterServerURL      string `json:"center_server_url"`
 	CenterServerSecret   string `json:"center_server_secret"`
 	AutoLocationCheckin  bool   `json:"auto_location_checkin"`
+	AutoNumberCheckin    bool   `json:"auto_number_checkin"`
 	TGBotToken           string `json:"tg_bot_token"`
 	TGChatID             string `json:"tg_chat_id"`
 }
@@ -45,6 +46,7 @@ func Load() error {
 		CurriculumPreMinutes: 10,
 		HTTPPort:             &defaultPort,
 		AutoLocationCheckin:  true,
+		AutoNumberCheckin:    true,
 	}
 
 	// Load from file
@@ -104,6 +106,10 @@ func applyEnvOverrides() {
 	if v := os.Getenv("EDGE_AUTO_LOCATION_CHECKIN"); v != "" {
 		lower := strings.ToLower(v)
 		Cfg.AutoLocationCheckin = lower == "true" || lower == "1" || lower == "yes"
+	}
+	if v := os.Getenv("EDGE_AUTO_NUMBER_CHECKIN"); v != "" {
+		lower := strings.ToLower(v)
+		Cfg.AutoNumberCheckin = lower == "true" || lower == "1" || lower == "yes"
 	}
 	if v := os.Getenv("TG_BOT_TOKEN"); v != "" {
 		Cfg.TGBotToken = v

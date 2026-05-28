@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rollcall-go.fullname" . }}
+  labels:
+    {{- include "rollcall-go.labels" . | nindent 4 }}
+    app.kubernetes.io/component: edge
+spec:
+  replicas: {{ .Values.edge.replicas }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "rollcall-go.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.edge.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "rollcall-go.selectorLabels" . | nindent 8 }}
+        {{- with .Values.edge.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "rollcall-go.fullname" . }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.edge.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.edge.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.edge.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: edge
+          image: {{ include "rollcall-go.image" (dict "registry" .Values.image.registry "repository" .Values.image.repository "tag" .Values.image.tag) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.edge.servicePort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "rollcall-go.fullname" . }}-config
+            - secretRef:
+                name: {{ include "rollcall-go.fullname" . }}-secret
+          {{- with .Values.edge.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.edge.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.edge.livenessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.edge.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.edge.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.edge.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.edge.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.edge.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.edge.readinessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.edge.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.edge.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.edge.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.edge.readinessProbe.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.edge.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            {{- with .Values.edge.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            {{- if .Values.persistence.existingClaim }}
+            claimName: {{ .Values.persistence.existingClaim }}
+            {{- else }}
+            claimName: {{ include "rollcall-go.fullname" . }}-data
+            {{- end }}
+        {{- with .Values.edge.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

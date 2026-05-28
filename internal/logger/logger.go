@@ -92,10 +92,11 @@ func (h *PrettyHandler) WithGroup(name string) slog.Handler {
 	return &PrettyHandler{w: h.w, level: h.level, attrs: h.attrs, group: name}
 }
 
-// Setup initializes the global slog logger with the pretty handler.
+// Setup initializes the global slog logger with the pretty handler and deduplication.
 func Setup(w io.Writer) {
 	handler := NewPrettyHandler(w, slog.LevelInfo)
-	slog.SetDefault(slog.New(handler))
+	dedupHandler := NewDeduplicatingHandler(handler)
+	slog.SetDefault(slog.New(dedupHandler))
 }
 
 // FormatDuration formats a duration in a human-friendly way.
